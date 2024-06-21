@@ -29,54 +29,89 @@
 
 using namespace Slic3r;
 
+
 #ifndef BUILD_TEST
-int
-main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     return CLI().run(argc, argv);
 }
 #endif // BUILD_TEST
 
-int CLI::run(int argc, char **argv) {
-    #ifdef SLIC3R_DEBUG
-        slic3r_log->set_level(log_t::DEBUG);
-    #endif
+
+int CLI::run(int argc, char **argv)
+{
+#ifdef SLIC3R_DEBUG
+    slic3r_log->set_level(log_t::DEBUG);
+#endif
+
     // Convert arguments to UTF-8 (needed on Windows).
     // argv then points to memory owned by a.
     boost::nowide::args a(argc, argv);
+
     // parse all command line options into a DynamicConfig
     t_config_option_keys opt_order;
+
     this->config_def.merge(cli_actions_config_def);
     this->config_def.merge(cli_transform_config_def);
     this->config_def.merge(cli_misc_config_def);
     this->config_def.merge(print_config_def);
+
     this->config.def = &this->config_def;
-    Slic3r::Log::debug("CLI")<<"Configs merged.\n";
+
+#ifdef SLIC3R_DEBUG
+    Slic3r::Log::debug("CLI") << "Configs merged." << std::endl;
+#endif
+
     // if any option is unsupported, print usage and abort immediately
-    if (!this->config.read_cli(argc, argv, &this->input_files, &opt_order)) {
+    if (!this->config.read_cli(argc, argv, &this->input_files, &opt_order))
+    {
         this->print_help();
+
         exit(EXIT_FAILURE);
     }
+
     // parse actions and transform options
-    for (auto const &opt_key : opt_order) {
-        if (cli_actions_config_def.has(opt_key)) this->actions.push_back(opt_key);
-        if (cli_transform_config_def.has(opt_key)) this->transforms.push_back(opt_key);
+    for (auto const &opt_key : opt_order)
+    {
+        if (cli_actions_config_def.has(opt_key))
+        {
+            this->actions.push_back(opt_key);
+        }
+
+        if (cli_transform_config_def.has(opt_key))
+        {
+            this->transforms.push_back(opt_key);
+        }
     }
+
     // load config files supplied via --load
-    for (auto const &file : config.getStrings("load", {})) {
-        try{
-            if (!boost::filesystem::exists(file)) {
-                if (config.getBool("ignore_nonexistent_file", false)) {
+    for (auto const &file : config.getStrings("load", {}))
+    {
+        try
+        {
+            if (!boost::filesystem::exists(file))
+            {
+                if (config.getBool("ignore_nonexistent_file", false))
+                {
                     continue;
-                } else {
+                }
+                else
+                {
                     throw std::invalid_argument("No such file");
                 }
             }
+
             DynamicPrintConfig c;
+
             c.load(file);
             c.normalize();
+
             this->print_config.apply(c);
-        } catch (std::exception &e){
-            Slic3r::Log::error("CLI") << "Error with the config file '" << file << "': " << e.what() <<std::endl;
+        }
+        catch (std::exception &e)
+        {
+            Slic3r::Log::error("CLI") << "Error with the config file '" << file << "': " << e.what() << std::endl;
+
             exit(EXIT_FAILURE);
         }
     }
@@ -85,46 +120,79 @@ int CLI::run(int argc, char **argv) {
     // (command line options override --load files)
     this->print_config.apply(config, true);
     this->print_config.normalize();
+
+#ifdef SLIC3R_DEBUG
     Slic3r::Log::debug("CLI") << "Print config normalized" << std::endl;
+#endif
+
     // create a static (full) print config to be used in our logic
     this->full_print_config.apply(this->print_config, true);
+
+#ifdef SLIC3R_DEBUG
     Slic3r::Log::debug("CLI") << "Full print config created" << std::endl;
+#endif
+
     // validate config
-    try {
+    try
+    {
         this->full_print_config.validate();
-    } catch (std::exception &e) {
+    }
+    catch (std::exception &e)
+    {
         Slic3r::Log::error("CLI") << "Config validation error: "<< e.what() << std::endl;
+
         exit(EXIT_FAILURE);
     }
+
+#ifdef SLIC3R_DEBUG
     Slic3r::Log::debug("CLI") << "Config validated" << std::endl;
+#endif
 
     // read input file(s) if any
-    for (auto const &file : input_files) {
+    for (auto const &file : input_files)
+    {
         Model model;
-        try {
+
+        try
+        {
             model = Model::read_from_file(file);
-        } catch (std::exception &e) {
+        }
+        catch (std::exception &e)
+        {
             Slic3r::Log::error("CLI") << file << ": " << e.what() << std::endl;
+
             exit(EXIT_FAILURE);
         }
-        if (model.objects.empty()) {
+
+        if (model.objects.empty())
+        {
             Slic3r::Log::error("CLI") << "Error: file is empty: " << file << std::endl;
+
             continue;
         }
+
         this->models.push_back(model);
     }
-    
+
     // loop through transform options
-    for (auto const &opt_key : this->transforms) {
-        if (opt_key == "merge") {
+    for (auto const &opt_key : this->transforms)
+    {
+        if (opt_key == "merge")
+        {
             Model m;
+
             for (auto &model : this->models)
+            {
                 m.merge(model);
-            
+            }
+
             // Rearrange instances unless --dont-arrange is supplied
-            if (!this->config.getBool("dont_arrange")) {
+            if (!this->config.getBool("dont_arrange"))
+            {
                 m.add_default_instances();
+
                 const BoundingBoxf bb{ this->full_print_config.bed_shape.values };
+
                 m.arrange_objects(
                     this->full_print_config.min_object_distance(),
                     // if we are going to use the merged model for printing, honor
@@ -134,7 +202,9 @@ int CLI::run(int argc, char **argv) {
             }
             
             this->models = {m};
-        } else if (opt_key == "duplicate") {
+        }
+        else if (opt_key == "duplicate")
+        {
             const BoundingBoxf bb{ this->full_print_config.bed_shape.values };
             for (auto &model : this->models) {
                 const bool all_objects_have_instances = std::none_of(
@@ -149,14 +219,18 @@ int CLI::run(int argc, char **argv) {
                     model.duplicate_objects(this->config.getInt("duplicate"), this->full_print_config.min_object_distance(), &bb);
                 }
             }
-        } else if (opt_key == "duplicate_grid") {
+        }
+        else if (opt_key == "duplicate_grid")
+        {
             auto &ints = this->config.opt<ConfigOptionInts>("duplicate_grid")->values;
             const int x = ints.size() > 0 ? ints.at(0) : 1;
             const int y = ints.size() > 1 ? ints.at(1) : 1;
             const double distance = this->full_print_config.duplicate_distance.value;
             for (auto &model : this->models)
                 model.duplicate_objects_grid(x, y, (distance > 0) ? distance : 6);  // TODO: this is not the right place for setting a default
-        } else if (opt_key == "center") {
+        }
+        else if (opt_key == "center")
+        {
             for (auto &model : this->models) {
                 model.add_default_instances();
                 // this affects instances:
@@ -164,36 +238,50 @@ int CLI::run(int argc, char **argv) {
                 // this affects volumes:
                 model.align_to_ground();
             }
-        } else if (opt_key == "align_xy") {
+        }
+        else if (opt_key == "align_xy")
+        {
             const Pointf p{ this->config.opt<ConfigOptionPoint>("align_xy")->value };
             for (auto &model : this->models) {
                 BoundingBoxf3 bb{ model.bounding_box() };
                 // this affects volumes:
                 model.translate(-(bb.min.x - p.x), -(bb.min.y - p.y), -bb.min.z);
             }
-        } else if (opt_key == "dont_arrange") {
+        }
+        else if (opt_key == "dont_arrange")
+        {
             // do nothing - this option alters other transform options
-        } else if (opt_key == "rotate") {
+        }
+        else if (opt_key == "rotate")
+        {
             for (auto &model : this->models)
                 for (auto &o : model.objects)
                     // this affects volumes:
                     o->rotate(Geometry::deg2rad(config.getFloat(opt_key)), Z);
-        } else if (opt_key == "rotate_x") {
+        }
+        else if (opt_key == "rotate_x")
+        {
             for (auto &model : this->models)
                 for (auto &o : model.objects)
                     // this affects volumes:
                     o->rotate(Geometry::deg2rad(config.getFloat(opt_key)), X);
-        } else if (opt_key == "rotate_y") {
+        }
+        else if (opt_key == "rotate_y")
+        {
             for (auto &model : this->models)
                 for (auto &o : model.objects)
                     // this affects volumes:
                     o->rotate(Geometry::deg2rad(config.getFloat(opt_key)), Y);
-        } else if (opt_key == "scale") {
+        }
+        else if (opt_key == "scale")
+        {
             for (auto &model : this->models)
                 for (auto &o : model.objects)
                     // this affects volumes:
                     o->scale(config.get_abs_value(opt_key, 1));
-        } else if (opt_key == "scale_to_fit") {
+        }
+        else if (opt_key == "scale_to_fit")
+        {
             const auto opt = config.opt<ConfigOptionPoint3>(opt_key);
             if (!opt->is_positive_volume()) {
                 Slic3r::Log::error("CLI") << "--scale-to-fit requires a positive volume" << std::endl;
@@ -203,7 +291,9 @@ int CLI::run(int argc, char **argv) {
                 for (auto &o : model.objects)
                     // this affects volumes:
                     o->scale_to_fit(opt->value);
-        } else if (opt_key == "cut" || opt_key == "cut_x" || opt_key == "cut_y") {
+        }
+        else if (opt_key == "cut" || opt_key == "cut_x" || opt_key == "cut_y")
+        {
             std::vector<Model> new_models;
             for (auto &model : this->models) {
                 model.repair();
@@ -234,7 +324,9 @@ int CLI::run(int argc, char **argv) {
             
             if (this->actions.empty())
                 this->actions.push_back("export_stl");
-        } else if (opt_key == "cut_grid") {
+        }
+        else if (opt_key == "cut_grid")
+        {
             std::vector<Model> new_models;
             for (auto &model : this->models) {
                 TriangleMesh mesh = model.mesh();
@@ -256,20 +348,27 @@ int CLI::run(int argc, char **argv) {
             
             if (this->actions.empty())
                 this->actions.push_back("export_stl");
-        } else if (opt_key == "split") {
+        }
+        else if (opt_key == "split")
+        {
             for (auto &model : this->models)
                 model.split();
-        } else if (opt_key == "repair") {
+        }
+        else if (opt_key == "repair")
+        {
             for (auto &model : this->models)
                 model.repair();
-        } else {
-	    Slic3r::Log::error("CLI") << " option not implemented yet: " << opt_key << std::endl;
-	    exit(EXIT_FAILURE);
+        }
+        else
+        {
+	        Slic3r::Log::error("CLI") << " option not implemented yet: " << opt_key << std::endl;
+	        exit(EXIT_FAILURE);
         }
     }
-    
+
     // loop through action options
-    for (auto const &opt_key : this->actions) {
+    for (auto const &opt_key : this->actions)
+    {
         if (opt_key == "help") {
             this->print_help();
         } else if (opt_key == "help_options") {
@@ -401,7 +500,8 @@ int CLI::run(int argc, char **argv) {
         }
     }
     
-    if (actions.empty()) {
+    if (actions.empty())
+    {
 #ifdef USE_WX
         GUI::App *gui = new GUI::App();
         try {
@@ -426,48 +526,57 @@ int CLI::run(int argc, char **argv) {
     return 0;
 }
 
-void
-CLI::print_help(bool include_print_options) const {
+void CLI::print_help(bool include_print_options) const
+{
     boost::nowide::cout
         << "Slic3r " << SLIC3R_VERSION << " (build commit: " << BUILD_COMMIT << ")" << std::endl
         << "https://slic3r.org/ - https://github.com/slic3r/Slic3r" << std::endl << std::endl
         << "Usage: slic3r [ ACTIONS ] [ TRANSFORM ] [ OPTIONS ] [ file.stl ... ]" << std::endl
         << std::endl
         << "Actions:" << std::endl;
+
     cli_actions_config_def.print_cli_help(boost::nowide::cout, false);
-    
+
     boost::nowide::cout
         << std::endl
         << "Transform options:" << std::endl;
-        cli_transform_config_def.print_cli_help(boost::nowide::cout, false);
-    
+
+    cli_transform_config_def.print_cli_help(boost::nowide::cout, false);
+
     boost::nowide::cout
         << std::endl
         << "Other options:" << std::endl;
-        cli_misc_config_def.print_cli_help(boost::nowide::cout, false);
-    
-    if (include_print_options) {
+
+    cli_misc_config_def.print_cli_help(boost::nowide::cout, false);
+
+    if (include_print_options)
+    {
         boost::nowide::cout << std::endl;
+
         print_config_def.print_cli_help(boost::nowide::cout, true);
-    } else {
+    }
+    else
+    {
         boost::nowide::cout
             << std::endl
             << "Run --help-options to see the full listing of print/G-code options." << std::endl;
     }
 }
 
-void
-CLI::export_models(IO::ExportFormat format) {
-    for (const Model& model : this->models) {
+void CLI::export_models(IO::ExportFormat format)
+{
+    for (const Model& model : this->models)
+    {
         const std::string outfile = this->output_filepath(model, format);
-        
+
         IO::write_model.at(format)(model, outfile);
+
         std::cout << "File exported to " << outfile << std::endl;
     }
 }
 
-std::string
-CLI::output_filepath(const Model &model, IO::ExportFormat format) const {
+std::string CLI::output_filepath(const Model &model, IO::ExportFormat format) const
+{
     // get the --output-filename-format option
     std::string filename_format = this->print_config.getString("output_filename_format", "[input_filename_base]");
     
@@ -480,30 +589,44 @@ CLI::output_filepath(const Model &model, IO::ExportFormat format) const {
     
     // find the first input_file of the model
     boost::filesystem::path input_file;
-    for (auto o : model.objects) {
-        if (!o->input_file.empty()) {
+
+    for (auto o : model.objects)
+    {
+        if (!o->input_file.empty())
+        {
             input_file = o->input_file;
+
             break;
         }
     }
-    
+
     // compute the automatic filename
     PlaceholderParser pp;
+
     pp.set("input_filename", input_file.filename().string());
     pp.set("input_filename_base", input_file.stem().string());
+
     pp.apply_config(this->config);
+
     const std::string filename = pp.process(filename_format);
-    
+
     // use --output when available
     std::string outfile{ this->config.getString("output", "") };
-    if (!outfile.empty()) {
+
+    if (!outfile.empty())
+    {
         // if we were supplied a directory, use it and append our automatically generated filename
         const boost::filesystem::path out(outfile);
+
         if (boost::filesystem::is_directory(out))
+        {
             outfile = (out / filename).string();
-    } else {
+        }
+    }
+    else
+    {
         outfile = (input_file.parent_path() / filename).string();
     }
-    
+
     return outfile;
 }
